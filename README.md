@@ -78,6 +78,7 @@ Tips：一般情况下会主动填充运行进程的进程id（可在配置页�
 启用 IDEA 的 Kotlin 插件后，可在 `.kt` 方法上使用相同的 Open AnyDoor 入口。参数编辑、JSON 模板、Key 补全与源码导航、历史参数和再次调用沿用 Java 流程。
 
 - 支持普通类、Spring Bean、私有方法、重载、顶层函数、`object` 和 companion object 方法。
+- 通过 IDEA 的 Kotlin Run/Debug 配置启动本地 JVM 应用时，自动记录目标 PID；外部启动的进程仍可在参数窗口中指定 PID。
 - 支持 `Int` / `Int?`、数组、集合和 data class JSON 参数；调用使用 JVM 的真实类型、嵌套类名和 `@JvmName`。
 - 支持现有同步、异步和批量调度。这里的异步是后台执行普通方法，不是 Kotlin 协程执行。
 - 不自动使用 Kotlin 默认参数，也不调用编译器生成的 `$default` 方法。缺失参数沿用现有协议传入 `null`，由参数可空性决定是否接受；需要某个默认值时请显式填写该值。

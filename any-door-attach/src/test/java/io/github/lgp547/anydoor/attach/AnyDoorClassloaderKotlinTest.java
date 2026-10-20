@@ -46,6 +46,72 @@ public class AnyDoorClassloaderKotlinTest {
     /** Kotlin fixture 的二进制类名；用字符串避免测试加载器预先加载该类。 */
     private static final String FIXTURE_CLASS = "io.github.lgp547.anydoor.attach.fixture.IsolatedKotlinFixture";
 
+    /** 非 Spring 目标的私有调用保留原实例，避免在 attach 加载器中解析可选的 Spring 类型。 */
+    @Test
+    public void privateInvocationKeepsInstanceWhenSpringIsUnavailable() throws Exception {
+        URL[] runtimeUrls = {
+                AnyDoorAttach.class.getProtectionDomain().getCodeSource().getLocation(),
+                AnyDoorClassloader.class.getProtectionDomain().getCodeSource().getLocation()
+        };
+        String stdlibPath = new File(Class.forName("kotlin.Unit").getProtectionDomain()
+                .getCodeSource().getLocation().toURI()).getAbsolutePath();
+        URL[] targetUrls = {
+                new File("target/test-classes").toURI().toURL(),
+                new File(stdlibPath).toURI().toURL()
+        };
+        ClassLoader parent = ClassLoader.getSystemClassLoader().getParent();
+        try (URLClassLoader runtimeClassLoader = new URLClassLoader(runtimeUrls, null);
+             URLClassLoader targetClassLoader = new URLClassLoader(targetUrls, parent)) {
+            assertClassNotFound(runtimeClassLoader, "org.springframework.util.Assert");
+            assertClassNotFound(targetClassLoader, "org.springframework.util.Assert");
+            Class<?> fixtureClass = targetClassLoader.loadClass(FIXTURE_CLASS);
+            Object candidate = fixtureClass.getField("INSTANCE").get(null);
+            Class<?> resolverClass = runtimeClassLoader.loadClass(
+                    "io.github.lgp547.anydoor.attach.InvocationInstanceResolver");
+            Method resolver = resolverClass.getDeclaredMethod("resolve", Object.class, boolean.class);
+            resolver.setAccessible(true);
+            Object resolved = resolver.invoke(null, candidate, true);
+            assertSame(candidate, resolved);
+
+            try {
+                resolver.invoke(null, new Object[]{null, true});
+                fail("私有调用实例为 null 时应保留既有校验契约");
+            } catch (java.lang.reflect.InvocationTargetException expected) {
+                assertEquals(IllegalArgumentException.class, expected.getCause().getClass());
+                assertEquals("Candidate must not be null", expected.getCause().getMessage());
+            }
+        }
+    }
+
+    /** Spring 目标仍需解开 JDK 与 CGLIB 代理，以便访问实际目标声明的私有方法。 */
+    @Test
+    public void privateInvocationUnwrapsSpringJdkAndCglibProxies() {
+        InvocationTarget target = new InvocationTargetImpl();
+
+        org.springframework.aop.framework.ProxyFactory jdkProxyFactory =
+                new org.springframework.aop.framework.ProxyFactory(target);
+        jdkProxyFactory.setProxyTargetClass(false);
+        Object jdkProxy = jdkProxyFactory.getProxy();
+        assertSame(target, InvocationInstanceResolver.resolve(jdkProxy, true));
+
+        org.springframework.aop.framework.ProxyFactory cglibProxyFactory =
+                new org.springframework.aop.framework.ProxyFactory(target);
+        cglibProxyFactory.setProxyTargetClass(true);
+        Object cglibProxy = cglibProxyFactory.getProxy();
+        assertSame(target, InvocationInstanceResolver.resolve(cglibProxy, true));
+    }
+
+    private interface InvocationTarget {
+        String invoke();
+    }
+
+    private static class InvocationTargetImpl implements InvocationTarget {
+        @Override
+        public String invoke() {
+            return "target";
+        }
+    }
+
     /**
      * 目标应用只有 fixture 与 Kotlin 标准库时，隔离运行端仍能反序列化目标 data class。
      */
