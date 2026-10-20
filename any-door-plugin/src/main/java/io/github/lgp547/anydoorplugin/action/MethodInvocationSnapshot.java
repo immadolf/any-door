@@ -4,7 +4,6 @@ import com.intellij.openapi.application.ReadAction;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiParameterList;
-import io.github.lgp547.anydoorplugin.AnyDoorBundle;
 import io.github.lgp547.anydoorplugin.dialog.utils.IdeClassUtil;
 import io.github.lgp547.anydoorplugin.util.AnyDoorActionUtil;
 
@@ -45,7 +44,7 @@ record MethodInvocationSnapshot(
         List<String> parameterTypes = AnyDoorActionUtil.toJvmParamTypeNameList(parameterList);
         boolean kotlinMethod = IdeClassUtil.isKotlinMethod(psiMethod);
         if (kotlinMethod && parameterTypes.contains("kotlin.coroutines.Continuation")) {
-            throw new IllegalArgumentException(AnyDoorBundle.message("method.suspend.unsupported"));
+            throw new UnsupportedSuspendMethodException();
         }
         return new MethodInvocationSnapshot(
                 IdeClassUtil.getJvmClassName(psiClass),

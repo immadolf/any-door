@@ -21,6 +21,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 /**
  * 打开任意门，核心执行
@@ -28,8 +29,10 @@ import java.util.function.BiConsumer;
 public class AnyDoorPerformed {
 
     public void invoke(Project project, PsiMethod psiMethod, Runnable okAction) {
-        MethodInvocationSnapshot method = MethodInvocationSnapshot.capture(psiMethod);
-
+        MethodInvocationSnapshot method = captureMethod(project, () -> MethodInvocationSnapshot.capture(psiMethod));
+        if (method == null) {
+            return;
+        }
 
         Optional<AnyDoorSettingsState> anyDoorSettingsStateOpt = AnyDoorSettingsState.getAnyDoorSettingsStateNotExc(project);
         if (anyDoorSettingsStateOpt.isEmpty()) {
@@ -87,8 +90,22 @@ public class AnyDoorPerformed {
     }
 
     public void doUseNewUI(AnyDoorSettingsState service, Project project, PsiClass psiClass, PsiMethod psiMethod, String cacheKey, Runnable okAction, @Nullable Long selectedId) {
-        MethodInvocationSnapshot method = MethodInvocationSnapshot.capture(psiClass, psiMethod);
+        MethodInvocationSnapshot method = captureMethod(project, () -> MethodInvocationSnapshot.capture(psiClass, psiMethod));
+        if (method == null) {
+            return;
+        }
         doUseNewUI(service, project, method, cacheKey, okAction, selectedId);
+    }
+
+    /** 三个界面入口共用能力拒绝处理；其他快照异常仍交给各入口原有的错误路径。 */
+    @Nullable
+    private static MethodInvocationSnapshot captureMethod(Project project, Supplier<MethodInvocationSnapshot> capture) {
+        try {
+            return capture.get();
+        } catch (UnsupportedSuspendMethodException exception) {
+            NotifierUtil.notifyInfo(project, exception.getMessage());
+            return null;
+        }
     }
 
     private void doUseNewUI(AnyDoorSettingsState service, Project project, MethodInvocationSnapshot method, String cacheKey, Runnable okAction, @Nullable Long selectedId) {

@@ -3,6 +3,9 @@ package io.github.lgp547.anydoorplugin.action;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationType;
+import com.intellij.notification.Notifications;
 import com.intellij.openapi.projectRoots.JavaSdk;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.psi.PsiElement;
@@ -15,6 +18,8 @@ import com.intellij.util.PathUtil;
 import io.github.lgp547.anydoorplugin.dialog.utils.IdeClassUtil;
 import io.github.lgp547.anydoorplugin.dialog.JSONEditor;
 import io.github.lgp547.anydoorplugin.dialog.navigation.JsonKeyNavigationProvider;
+import io.github.lgp547.anydoorplugin.AnyDoorBundle;
+import io.github.lgp547.anydoorplugin.settings.AnyDoorSettingsState;
 import io.github.lgp547.anydoorplugin.util.AnyDoorActionUtil;
 import io.github.lgp547.anydoorplugin.util.JsonElementUtil;
 import io.github.lgp547.anydoorplugin.util.JsonUtil;
@@ -22,6 +27,7 @@ import org.jetbrains.uast.UMethod;
 import org.jetbrains.uast.UastContextKt;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -156,6 +162,84 @@ public class KotlinMethodInvocationTest extends LightJavaCodeInsightFixtureTestC
             fail("suspend 方法应明确拒绝，不能发出缺少 continuation 的请求");
         } catch (IllegalArgumentException expected) {
             assertNotNull(expected.getMessage());
+        }
+    }
+
+    /** 从实际菜单入口拒绝 suspend 时，只发普通通知，不产生 IDE 插件错误或更新再次调用记录。 */
+    public void testSuspendOpenActionOnlyShowsInformation() {
+        configureSuspendMethod();
+        List<Notification> notifications = captureNotifications();
+        String projectName = getProject().getName();
+        PsiMethod previous = AnyDoorAgainOpenAction.PRE_METHOD_MAP.remove(projectName);
+        try {
+            new AnyDoorOpenAction().actionPerformed(actionEvent());
+            assertSuspendInformation(notifications);
+            assertFalse(AnyDoorAgainOpenAction.PRE_METHOD_MAP.containsKey(projectName));
+        } finally {
+            restorePreviousMethod(projectName, previous);
+        }
+    }
+
+    /** 缓存方法后来变为 suspend 时，再次调用入口应采用相同的预期拒绝处理。 */
+    public void testSuspendAgainActionOnlyShowsInformation() {
+        PsiMethod method = configureSuspendMethod();
+        List<Notification> notifications = captureNotifications();
+        String projectName = getProject().getName();
+        PsiMethod previous = AnyDoorAgainOpenAction.PRE_METHOD_MAP.put(projectName, method);
+        try {
+            new AnyDoorAgainOpenAction().actionPerformed(actionEvent());
+            assertSuspendInformation(notifications);
+            assertSame(method, AnyDoorAgainOpenAction.PRE_METHOD_MAP.get(projectName));
+        } finally {
+            restorePreviousMethod(projectName, previous);
+        }
+    }
+
+    /** 历史参数入口同样在打开窗口和执行回调前拒绝 suspend。 */
+    public void testSuspendHistoryOnlyShowsInformation() {
+        PsiMethod method = configureSuspendMethod();
+        List<Notification> notifications = captureNotifications();
+        new AnyDoorPerformed().doUseNewUI(new AnyDoorSettingsState(), getProject(),
+                method.getContainingClass(), method,
+                AnyDoorActionUtil.genCacheKey(method.getContainingClass(), method),
+                () -> fail("suspend 拒绝后不能执行成功回调"), null);
+        assertSuspendInformation(notifications);
+    }
+
+    private PsiMethod configureSuspendMethod() {
+        myFixture.configureByText("Async.kt", """
+                package sample
+                class Async {
+                    suspend fun <caret>run(value: String) = value
+                }
+                """);
+        return lightMethodAtCaret();
+    }
+
+    private List<Notification> captureNotifications() {
+        List<Notification> notifications = new ArrayList<>();
+        getProject().getMessageBus().connect(getTestRootDisposable()).subscribe(Notifications.TOPIC, new Notifications() {
+            @Override
+            public void notify(Notification notification) {
+                notifications.add(notification);
+            }
+        });
+        return notifications;
+    }
+
+    private void assertSuspendInformation(List<Notification> notifications) {
+        assertEquals("预期只出现一条 suspend 能力提示", 1, notifications.size());
+        Notification notification = notifications.get(0);
+        assertEquals(NotificationType.INFORMATION, notification.getType());
+        assertTrue(notification.getContent().contains(AnyDoorBundle.message("method.suspend.unsupported")));
+        notification.expire();
+    }
+
+    private static void restorePreviousMethod(String projectName, PsiMethod previous) {
+        if (previous == null) {
+            AnyDoorAgainOpenAction.PRE_METHOD_MAP.remove(projectName);
+        } else {
+            AnyDoorAgainOpenAction.PRE_METHOD_MAP.put(projectName, previous);
         }
     }
 
